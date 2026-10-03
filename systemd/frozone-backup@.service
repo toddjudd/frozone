@@ -1,0 +1,15 @@
+# Templated unit — instantiate per config, e.g.:
+#   systemctl enable --now frozone@immich.timer
+# where the "immich" instance name maps to config/immich.env
+[Unit]
+Description=Deep Archive Backup (%i)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# EnvironmentFile pulls in the 1Password service account token so `op`
+# can resolve secrets at runtime — see README for the exact setup.
+EnvironmentFile=/etc/frozone.env
+WorkingDirectory=/opt/frozone
+ExecStart=/opt/frozone/scripts/backup.sh /opt/frozone/config/%i.env

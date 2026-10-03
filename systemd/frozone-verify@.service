@@ -1,0 +1,10 @@
+[Unit]
+Description=Deep Archive Verify (%i)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/frozone.env
+WorkingDirectory=/opt/frozone
+ExecStart=/opt/frozone/scripts/verify.sh /opt/frozone/config/%i.env

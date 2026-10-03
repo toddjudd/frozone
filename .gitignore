@@ -1,0 +1,14 @@
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/.terraform.lock.hcl
+terraform/*.tfvars
+
+# Local secrets, if anyone ever drops a real one in by mistake
+*.env
+!config/example.env
+
+
+# Logs
+*.log

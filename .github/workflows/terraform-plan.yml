@@ -1,0 +1,40 @@
+name: terraform plan
+
+# Runs on every push, including from forks — but a plan is read-only and
+# this workflow never has access to secrets when triggered from a fork,
+# so it's safe by construction. Deliberately does NOT use
+# `pull_request_target` anywhere in this repo (see README for why).
+on:
+  push:
+    branches: ["**"]
+    paths: ["terraform/**"]
+  pull_request:
+    paths: ["terraform/**"]
+
+permissions:
+  id-token: write # required for OIDC
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: terraform init
+        working-directory: terraform
+        run: terraform init
+
+      - name: terraform plan
+        working-directory: terraform
+        run: terraform plan -input=false
+        env:
+          TF_VAR_bucket_name: ${{ vars.BUCKET_NAME }}
+          TF_VAR_github_repo: ${{ github.repository }}

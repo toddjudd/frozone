@@ -1,0 +1,9 @@
+[Unit]
+Description=Monthly Deep Archive Verify (%i)
+
+[Timer]
+OnCalendar=monthly
+Persistent=true
+
+[Install]
+WantedBy=timers.target

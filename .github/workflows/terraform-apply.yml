@@ -1,0 +1,36 @@
+name: terraform apply
+
+# Deliberately manual-only (workflow_dispatch) and gated behind a GitHub
+# Environment with a required reviewer, so no push or PR — from a fork or
+# otherwise — can ever trigger an apply. You click the button.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    environment: production # configure required reviewers on this Environment in repo settings
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: terraform init
+        working-directory: terraform
+        run: terraform init
+
+      - name: terraform apply
+        working-directory: terraform
+        run: terraform apply -auto-approve -input=false
+        env:
+          TF_VAR_bucket_name: ${{ vars.BUCKET_NAME }}
+          TF_VAR_github_repo: ${{ github.repository }}
