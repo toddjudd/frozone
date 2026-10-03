@@ -122,6 +122,7 @@ up a second notification path. See `scripts/notify.sh`.
 │   ├── backup.sh         # rclone copy, Deep Archive, logs + notifies
 │   ├── restore.sh        # request restore / check status / download
 │   ├── verify.sh         # size-only check that remote matches source
+│   ├── validate.sh       # fail-fast config checks shared by the above
 │   └── notify.sh         # Discord DM + healthchecks.io helpers
 ├── config/
 │   ├── example.env       # documents every variable
@@ -167,9 +168,37 @@ up a second notification path. See `scripts/notify.sh`.
    sudo dpkg -i op.deb
    ```
 
-   configure the rclone S3 remote with the backup user's credentials `rclone config`, and
-   drop an `EnvironmentFile` at `/etc/frozone.env` that pulls
-   secrets via `op read`.
+   Configure the rclone S3 remote with the backup user's credentials
+   (`rclone config`).
+
+   Then create a 1Password **service account**, grant it read access to the
+   vault holding the `frozone` and `discord-bot` items, and put its token in
+   `/etc/frozone.env`:
+
+   ```
+   OP_SERVICE_ACCOUNT_TOKEN=ops_eyJzaWduSW...
+   ```
+
+   ```
+   sudo chown root:root /etc/frozone.env && sudo chmod 600 /etc/frozone.env
+   ```
+
+   That file is the *only* real secret on the host. systemd reads it
+   literally — it is not a shell, so `$(op read ...)` would be passed
+   through as a meaningless string. Instead, each `config/<name>.env`
+   carries `op://vault/item/field` references alongside its plain config
+   values, and the units invoke
+   `op run --env-file=config/%i.env -- scripts/backup.sh %i`.
+   `op run` resolves the references, passes plain values through untouched,
+   and masks resolved secrets in stdout/stderr. `backup.sh` and `verify.sh`
+   read their config from the environment, not from the file — the trailing
+   `%i` is just a label for logs and Discord messages.
+
+   Check it resolves before enabling the timers:
+
+   ```
+   op run --env-file=config/immich.env -- env | grep DISCORD
+   ```
 
 5. **Enable the timers**:
 

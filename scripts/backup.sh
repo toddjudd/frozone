@@ -1,31 +1,32 @@
 #!/usr/bin/env bash
 # backup.sh — sync a source directory to S3 Glacier Deep Archive.
 #
-# Usage: ./backup.sh config/<name>.env
+# Usage:
+#   op run --env-file=config/<name>.env -- ./backup.sh <name>
 #
-# Expects the config file to define:
+# Expects config/<name>.env to define:
 #   SOURCE_PATH   - directory to back up
 #   S3_REMOTE     - rclone remote name (e.g. "s3remote")
 #   S3_BUCKET     - bucket name
 #   S3_PREFIX     - key prefix within the bucket (e.g. "immich/")
 #   DB_DUMP_PATH  - optional; a file/dir to copy alongside SOURCE_PATH before upload (leave unset to skip)
 #
-# Secrets (AWS keys, Discord bot token, healthcheck URL) are expected to
-# already be exported into the environment before this runs — see README
-# for the 1Password pattern this is designed around.
+# That file holds both config values and op:// secret references, and is read
+# by `op run --env-file=` rather than sourced here — sourcing it would
+# overwrite the secrets op had just resolved with the literal op:// strings.
+# The argument is only a label for logs and notifications.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/notify.sh"
+source "${SCRIPT_DIR}/validate.sh"
 
-CONFIG_FILE="${1:?Usage: backup.sh <config-file>}"
-source "$CONFIG_FILE"
+INSTANCE="${1:?Usage: backup.sh <instance-name>}"
 
-: "${SOURCE_PATH:?SOURCE_PATH not set in config}"
-: "${S3_REMOTE:?S3_REMOTE not set in config}"
-: "${S3_BUCKET:?S3_BUCKET not set in config}"
-: "${S3_PREFIX:?S3_PREFIX not set in config}"
+validate_remote_config
+validate_source_path
+validate_notify_config
 
 LOG_DIR="${LOG_DIR:-/var/log/frozone}"
 mkdir -p "$LOG_DIR"
@@ -50,12 +51,12 @@ if rclone "${RCLONE_ARGS[@]}"; then
   fi
 
   log "Backup completed successfully"
-  discord_dm "✅ frozone (${CONFIG_FILE##*/}) completed: $(date -u +'%Y-%m-%d %H:%M UTC')" || true
+  discord_dm "✅ frozone (${INSTANCE}) completed: $(date -u +'%Y-%m-%d %H:%M UTC')" || true
   healthcheck_ping
   exit 0
 else
   log "Backup FAILED — see ${LOGFILE}"
-  discord_dm "❌ frozone (${CONFIG_FILE##*/}) FAILED — check ${LOGFILE} on the host" || true
+  discord_dm "❌ frozone (${INSTANCE}) FAILED — check ${LOGFILE} on the host" || true
   healthcheck_ping "/fail"
   exit 1
 fi

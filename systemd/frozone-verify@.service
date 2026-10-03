@@ -7,4 +7,4 @@ After=network-online.target
 Type=oneshot
 EnvironmentFile=/etc/frozone.env
 WorkingDirectory=/opt/frozone
-ExecStart=/opt/frozone/scripts/verify.sh /opt/frozone/config/%i.env
+ExecStart=/usr/bin/op run --env-file=/opt/frozone/config/%i.env -- /opt/frozone/scripts/verify.sh %i

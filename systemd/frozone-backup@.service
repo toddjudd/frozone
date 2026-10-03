@@ -8,8 +8,8 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-# EnvironmentFile pulls in the 1Password service account token so `op`
-# can resolve secrets at runtime — see README for the exact setup.
+# /etc/frozone.env holds only OP_SERVICE_ACCOUNT_TOKEN. systemd parses it
+# literally (no shell), so `op run` does the actual secret resolution.
 EnvironmentFile=/etc/frozone.env
 WorkingDirectory=/opt/frozone
-ExecStart=/opt/frozone/scripts/backup.sh /opt/frozone/config/%i.env
+ExecStart=/usr/bin/op run --env-file=/opt/frozone/config/%i.env -- /opt/frozone/scripts/backup.sh %i

@@ -10,19 +10,38 @@
 #   ./restore.sh config/<name>.env --request [--priority Standard|Bulk]
 #   ./restore.sh config/<name>.env --download <local-dest-dir>
 #   ./restore.sh config/<name>.env --status
+#
+# Unlike backup.sh and verify.sh, this script SOURCES the config file rather
+# than relying on `op run --env-file` to have loaded it. That difference is
+# deliberate: those two run unattended from systemd, where `op run` is always
+# in front of them, so sourcing would overwrite the secrets op had already
+# resolved with the literal op:// strings.
+#
+# This script runs by hand, during the disaster. Requiring `op run` here would
+# mean a working 1Password service account is a prerequisite for reading a
+# bucket name — so a 1Password outage, an expired service-account token, or a
+# host that never had `op` installed would block the restore. Sourcing keeps
+# the non-secret config (remote, bucket, prefix) readable with nothing but
+# bash and rclone.
+#
+# The cost is that DISCORD_BOT_TOKEN stays an unresolved op:// string unless
+# you wrap this in `op run` too, so the confirmation DM is skipped. The restore
+# itself is unaffected. Optional convenience, not a requirement:
+#   op run --env-file=config/<name>.env -- ./restore.sh config/<name>.env --status
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/notify.sh"
+source "${SCRIPT_DIR}/validate.sh"
 
 CONFIG_FILE="${1:?Usage: restore.sh <config-file> --request|--download|--status}"
 ACTION="${2:?Specify --request, --download, or --status}"
 source "$CONFIG_FILE"
 
-: "${S3_REMOTE:?S3_REMOTE not set in config}"
-: "${S3_BUCKET:?S3_BUCKET not set in config}"
-: "${S3_PREFIX:?S3_PREFIX not set in config}"
+# Destination only — notify config is intentionally not required here, so a
+# restore still works when Discord secrets can't be resolved.
+validate_remote_config
 
 REMOTE_PATH="${S3_REMOTE}:${S3_BUCKET}/${S3_PREFIX}"
 

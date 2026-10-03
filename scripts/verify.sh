@@ -3,20 +3,20 @@
 # looks like the source, without touching (or paying to thaw) Deep Archive
 # data. Run monthly/quarterly from a separate, lighter-weight timer.
 #
-# Usage: ./verify.sh config/<name>.env
+# Usage: op run --env-file=config/<name>.env -- ./verify.sh <name>
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/notify.sh"
+source "${SCRIPT_DIR}/validate.sh"
 
-CONFIG_FILE="${1:?Usage: verify.sh <config-file>}"
-source "$CONFIG_FILE"
+# Config comes from the environment via `op run`; this is only a label.
+INSTANCE="${1:?Usage: verify.sh <instance-name>}"
 
-: "${SOURCE_PATH:?SOURCE_PATH not set in config}"
-: "${S3_REMOTE:?S3_REMOTE not set in config}"
-: "${S3_BUCKET:?S3_BUCKET not set in config}"
-: "${S3_PREFIX:?S3_PREFIX not set in config}"
+validate_remote_config
+validate_source_path
+validate_notify_config
 
 REMOTE_PATH="${S3_REMOTE}:${S3_BUCKET}/${S3_PREFIX}"
 
@@ -24,12 +24,12 @@ log "Verifying ${SOURCE_PATH} against ${REMOTE_PATH} (size-only — Deep Archive
 
 if rclone check "$SOURCE_PATH" "$REMOTE_PATH" --size-only --one-way; then
   log "Verify OK: remote matches local by size and file count"
-  discord_dm "🔎 Verify OK: ${CONFIG_FILE##*/} matches remote archive" || true
+  discord_dm "🔎 Verify OK: ${INSTANCE} matches remote archive" || true
   healthcheck_ping
   exit 0
 else
   log "Verify MISMATCH — remote archive is missing files present locally"
-  discord_dm "⚠️ Verify MISMATCH for ${CONFIG_FILE##*/} — remote archive is behind. Run backup.sh." || true
+  discord_dm "⚠️ Verify MISMATCH for ${INSTANCE} — remote archive is behind. Run backup.sh." || true
   healthcheck_ping "/fail"
   exit 1
 fi
