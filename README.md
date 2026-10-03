@@ -120,6 +120,7 @@ up a second notification path. See `scripts/notify.sh`.
 │   ├── restore.sh        # request restore / check status / download
 │   ├── verify.sh         # size-only check that remote matches source
 │   ├── validate.sh       # fail-fast config checks shared by the above
+│   ├── deploy.sh         # copy this checkout to /opt/frozone, reload units
 │   └── notify.sh         # Discord DM + healthchecks.io helpers
 ├── config/
 │   ├── example.env       # documents every variable
@@ -163,8 +164,10 @@ up a second notification path. See `scripts/notify.sh`.
    sudo dpkg -i op.deb
    ```
 
-   Configure the rclone S3 remote with the backup user's credentials
-   (`rclone config`).
+   Skip `rclone config`. The `RCLONE_CONFIG_*` variables in
+   `config/<name>.env` define the remote and carry `op://` references to the
+   access key, so your credentials stay in 1Password and the root service
+   runs without an `rclone.conf`.
 
    Then create a 1Password **service account**, grant it read access to the
    vault holding the `frozone` and `discord-bot` items, and put its token in
@@ -195,12 +198,58 @@ up a second notification path. See `scripts/notify.sh`.
    op run --env-file=config/immich.env -- env | grep DISCORD
    ```
 
-4. **Enable the timers**:
+4. **Install the repo to `/opt/frozone`**. The units hardcode that path as
+   their `WorkingDirectory` and resolve `config/<name>.env` and
+   `scripts/*.sh` beneath it, so a checkout anywhere else will not be found.
 
    ```
-   systemctl enable --now frozone@immich.timer
-   systemctl enable --now deep-archive-verify@immich.timer
+   sudo ./scripts/deploy.sh
    ```
 
-5. **Read `RESTORE.md` once now**, while nothing is on fire, and keep a
+5. **Enable the timers**:
+
+   ```
+   sudo cp systemd/frozone-*.service systemd/frozone-*.timer /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now frozone-backup@immich.timer
+   sudo systemctl enable --now frozone-verify@immich.timer
+   ```
+
+6. **Read `RESTORE.md` once now**, while nothing is on fire, and keep a
    plaintext copy of it in 1Password.
+
+## Updating a deployed host
+
+`/opt/frozone` holds a copy of this repo. The systemd units resolve every
+path beneath it, so edits in your working tree do nothing until you redeploy.
+Change `config/immich.env` here, skip the redeploy, and the timer keeps
+running against the old value as though your edit never saved.
+
+After any change to `scripts/`, `config/`, or `systemd/`:
+
+```
+sudo ./scripts/deploy.sh
+```
+
+The script rsyncs the checkout over `/opt/frozone` with `--delete`, so
+removals propagate. It resets ownership and permissions, reinstalls the unit
+files into `/etc/systemd/system`, then runs `daemon-reload`. Leave the timers
+alone: `daemon-reload` covers a changed unit, and the enablement symlinks
+still point at the templates.
+
+### Testing a change without a full upload
+
+`systemd-run` hands you the unit's environment: same `EnvironmentFile`, same
+`HOME`, same working directory. Most breakage here comes from the environment
+rather than the scripts, so reproduce it instead of calling the scripts by
+hand:
+
+```
+sudo systemd-run --wait --collect --pipe --quiet --working-directory=/opt/frozone \
+  -p EnvironmentFile=/etc/frozone.env -p Environment=HOME=/root \
+  /usr/bin/op run --env-file=/opt/frozone/config/immich.env -- \
+  rclone size s3personal:t482-homeserver-frozone/immich/
+```
+
+Swap `rclone size` for `rclone copy <source> <remote> --dry-run` to see what
+a real run would upload.

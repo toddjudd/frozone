@@ -1,5 +1,5 @@
 # Templated unit — instantiate per config, e.g.:
-#   systemctl enable --now frozone@immich.timer
+#   systemctl enable --now frozone-backup@immich.timer
 # where the "immich" instance name maps to config/immich.env
 [Unit]
 Description=Deep Archive Backup (%i)
@@ -11,5 +11,8 @@ Type=oneshot
 # /etc/frozone.env holds only OP_SERVICE_ACCOUNT_TOKEN. systemd parses it
 # literally (no shell), so `op run` does the actual secret resolution.
 EnvironmentFile=/etc/frozone.env
+# systemd does not set HOME for root services; op and rclone both need it
+# to locate their config directories.
+Environment=HOME=/root
 WorkingDirectory=/opt/frozone
 ExecStart=/usr/bin/op run --env-file=/opt/frozone/config/%i.env -- /opt/frozone/scripts/backup.sh %i

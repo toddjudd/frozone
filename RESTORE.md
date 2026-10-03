@@ -11,8 +11,20 @@ reach GitHub when you need it.
 - Backup user credentials: 1Password item `frozone` →
   `access_key` / `secret_key`
 - rclone installed on the machine you're restoring to
-- rclone remote configured with those credentials (`rclone config`,
-  provider = AWS S3, or copy an existing `rclone.conf` from a working host)
+
+Everything below runs on bash and rclone alone. Skip `rclone config`: the
+`RCLONE_CONFIG_*` lines in `config/<name>.env` already describe the remote,
+leaving only the two credentials for you to supply. Read those off 1Password
+(web, phone, or emergency kit) and export them, substituting the remote name
+from `S3_REMOTE` in uppercase:
+
+```
+export RCLONE_CONFIG_S3PERSONAL_ACCESS_KEY_ID=AKIA...
+export RCLONE_CONFIG_S3PERSONAL_SECRET_ACCESS_KEY=...
+```
+
+`restore.sh` skips the `op://` lines when it reads the config, so your
+exported values survive. A working `op` stays optional.
 
 ## Step 1: request the restore, then wait
 

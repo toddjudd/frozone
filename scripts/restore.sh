@@ -37,7 +37,12 @@ source "${SCRIPT_DIR}/validate.sh"
 
 CONFIG_FILE="${1:?Usage: restore.sh <config-file> --request|--download|--status}"
 ACTION="${2:?Specify --request, --download, or --status}"
-source "$CONFIG_FILE"
+# Export the plain config so rclone inherits RCLONE_CONFIG_*, but skip the
+# op:// lines: assigning them here would clobber credentials the operator
+# exported by hand (or that `op run` already resolved) with literal strings.
+set -a
+source <(grep -v 'op://' "$CONFIG_FILE")
+set +a
 
 # Destination only — notify config is intentionally not required here, so a
 # restore still works when Discord secrets can't be resolved.

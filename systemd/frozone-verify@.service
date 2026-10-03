@@ -6,5 +6,8 @@ After=network-online.target
 [Service]
 Type=oneshot
 EnvironmentFile=/etc/frozone.env
+# systemd does not set HOME for root services; op and rclone both need it
+# to locate their config directories.
+Environment=HOME=/root
 WorkingDirectory=/opt/frozone
 ExecStart=/usr/bin/op run --env-file=/opt/frozone/config/%i.env -- /opt/frozone/scripts/verify.sh %i
