@@ -8,8 +8,7 @@ a documented path back if you have a disaster.
 
 It started as a one-off question, "how do I back up my Immich photo
 library," and grew into a generic, config-driven tool with
-Terraform-managed infrastructure, OIDC-authenticated CI, and Discord
-notifications.
+Terraform-managed infrastructure and Discord notifications.
 
 ## Why this exists
 
@@ -68,13 +67,12 @@ In part, by choice. Several existing tools cover pieces of this:
   reporting ~$4/month for 8TB in Deep Archive, which checks out against
   the per-GB math above. No Terraform, no CI, no chat notifications.
 
-None of them combine Terraform-managed least-privilege infra, OIDC'd CI
-with a plan/apply split, a dead-man's-switch health check, chat
-notifications, and a source-agnostic config design. rclone does the hard
-part: chunked multipart uploads, storage-class handling, restore
-orchestration. This repo adds the deployment and operations layer around
-it, gluing well-understood pieces together in a way documented enough to
-still make sense in five years.
+None of them combine Terraform-managed least-privilege infra, a
+dead-man's-switch health check, chat notifications, and a source-agnostic
+config design. rclone does the hard part: chunked multipart uploads,
+storage-class handling, restore orchestration. This repo adds the
+deployment and operations layer around it, gluing well-understood pieces
+together in a way documented enough to still make sense in five years.
 
 ## Design decisions
 
@@ -86,28 +84,27 @@ architecture would solve a problem this project doesn't have: multiple
 sources with different _logic_ rather than different paths.
 
 **Terraform over a one-off `aws cli` script.** For a single bucket and
-two IAM identities, a shell script would do the job. The point of this
+one IAM user, a shell script would do the job. The point of this
 project is that I don't have to remember what I clicked six months ago,
 and Terraform's plan output gives me that: a living description of what
 exists and why, that won't drift without telling me.
 
-**No static AWS credentials in GitHub Actions.** CI assumes the deploy
-role via OIDC for the duration of a run, so nothing long-lived sits in
-GitHub. `terraform plan` runs on every push, which is safe because forked
-PRs get no secrets in that context. `terraform apply` is
-`workflow_dispatch`-only, gated behind a GitHub Environment with a
-required reviewer. This repo avoids the `pull_request_target` trigger,
-the footgun that lets a forked PR exfiltrate secrets from a public repo.
-Avoiding it takes one line (`on: push` / `on: workflow_dispatch`), not a
-framework.
+**I gave GitHub Actions no AWS credentials.** CI runs `terraform fmt` and
+`terraform validate`. Terraform state sits on my laptop, so on each push
+I'd read the same CI plan: create every resource, from an empty state.
+`apply` needs that same state. Move the state into a private S3 backend
+and both become useful, and the OIDC role comes back with it. I also keep
+the workflow off the `pull_request_target` trigger, which hands fork code
+the base repo's secrets.
 
-**The backup job has its own separate static credential.** The GitHub
-OIDC role manages infrastructure and nothing else. The homelab host that
-runs rclone on a schedule uses a long-lived IAM access key, narrow by
-design: `PutObject`, `GetObject`, `RestoreObject`, `ListBucket`, and no
-`DeleteObject`. The key lives in 1Password and lands in the environment
-at run time via the `op` CLI. An attacker who compromises the host can
-fill the bucket but can't delete the existing archive.
+**I create the backup host's access key by hand.** The homelab host runs
+rclone on a schedule with a long-lived IAM key, scoped to `PutObject`,
+`GetObject`, `RestoreObject`, and `ListBucket` on one bucket, with no
+`DeleteObject`. An attacker who compromises the host can fill the bucket
+but can't delete the existing archive. Terraform creates the user and its
+policy but not the key, because an `aws_iam_access_key` resource writes
+the secret into state in plaintext. One `aws iam create-access-key` keeps
+it out of state, and the `op` CLI feeds it to the scripts at run time.
 
 **Discord DMs over a webhook.** The notifier reuses an existing bot
 (token plus user ID, opens a DM channel, posts to it) instead of standing
@@ -117,7 +114,7 @@ up a second notification path. See `scripts/notify.sh`.
 
 ```
 .
-├── terraform/            # S3 bucket, lifecycle → Deep Archive, both IAM identities
+├── terraform/            # S3 bucket, lifecycle → Deep Archive, backup IAM user
 ├── scripts/
 │   ├── backup.sh         # rclone copy, Deep Archive, logs + notifies
 │   ├── restore.sh        # request restore / check status / download
@@ -126,38 +123,36 @@ up a second notification path. See `scripts/notify.sh`.
 │   └── notify.sh         # Discord DM + healthchecks.io helpers
 ├── config/
 │   ├── example.env       # documents every variable
-│   └── immich.env        # the one real backup source, so far
+│   └── immich.env        # the one real backup source, so far (gitignored)
 ├── systemd/              # weekly backup timer, monthly verify timer
-├── .github/workflows/    # plan on push, apply on manual dispatch only
+├── .github/workflows/    # terraform fmt + validate, no AWS access
 └── RESTORE.md            # the file to read during an actual emergency
 ```
 
 ## Setup
 
-1. **Bootstrap the GitHub OIDC provider**, if your AWS account doesn't
-   already have one. Most accounts need this once, across every repo that
-   uses OIDC, so check first. See AWS's
-   [GitHub Actions OIDC docs](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services).
-
-2. **Run the first apply from your own machine**, not CI, since the
-   deploy role doesn't exist yet:
+1. **Create the infrastructure from your own machine.** No CI job runs
+   `apply`, and the state file stays with you.
 
    ```
    cd terraform
    terraform init
-   terraform apply -var bucket_name=<something-globally-unique> \
-                    -var github_repo=<you>/frozone
+   terraform apply -var bucket_name=<something-globally-unique>
    ```
 
-   Copy `backup_user_access_key_id` and `backup_user_secret_access_key`
-   into 1Password. Note `github_deploy_role_arn`.
+   Back up `terraform.tfstate`. Git ignores it, and it holds the only
+   record of what Terraform manages.
 
-3. **In the GitHub repo settings**, add repository variables:
-   `AWS_DEPLOY_ROLE_ARN` (the role ARN from step 2) and `BUCKET_NAME`.
-   Create a `production` Environment with yourself as a required reviewer
-   for the apply workflow.
+2. **Create the backup user's access key** and paste it into 1Password as
+   the `frozone` item (`access_key` / `secret_key`):
 
-4. **On the homelab host**, install `rclone` and the 1Password CLI
+   ```
+   aws iam create-access-key --user-name frozone
+   ```
+
+   AWS shows you the secret once.
+
+3. **On the homelab host**, install `rclone` and the 1Password CLI
 
    ```
    # rclone — does the actual S3 upload
@@ -200,12 +195,12 @@ up a second notification path. See `scripts/notify.sh`.
    op run --env-file=config/immich.env -- env | grep DISCORD
    ```
 
-5. **Enable the timers**:
+4. **Enable the timers**:
 
    ```
    systemctl enable --now frozone@immich.timer
    systemctl enable --now deep-archive-verify@immich.timer
    ```
 
-6. **Read `RESTORE.md` once now**, while nothing is on fire, and keep a
+5. **Read `RESTORE.md` once now**, while nothing is on fire, and keep a
    plaintext copy of it in 1Password.
