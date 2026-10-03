@@ -1,9 +1,13 @@
 # --- Backup identity: used by rclone on the homelab host -------------------
 # Long-lived access key, intentionally scoped with NO delete permission —
 # if the host is ever compromised, the attacker can fill the bucket but
-# cannot destroy the existing archive. The access key itself is generated
-# here but should be copied into 1Password immediately and never committed
-# or left in Terraform state you don't control tightly.
+# cannot destroy the existing archive.
+#
+# The access key is deliberately NOT managed here: Terraform would hold the
+# secret in plaintext in state forever. Mint it once by hand and paste it
+# straight into 1Password:
+#
+#   aws iam create-access-key --user-name frozone
 
 resource "aws_iam_user" "backup" {
   name = "frozone"
@@ -37,60 +41,6 @@ resource "aws_iam_user_policy" "backup" {
   })
 }
 
-resource "aws_iam_access_key" "backup" {
-  user = aws_iam_user.backup.name
-}
-
-# --- Deploy identity: used by GitHub Actions via OIDC -----------------------
-# Actions assumes this role for the duration of a run.
-# Scoped to this one bucket/IAM user, not account-wide.
-
-data "aws_iam_openid_connect_provider" "github" {
-  # Assumes the GitHub OIDC provider already exists in the account.
-  url = "https://token.actions.githubusercontent.com"
-}
-
-resource "aws_iam_role" "github_deploy" {
-  name = "frozone-github-deploy"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = {
-        Federated = data.aws_iam_openid_connect_provider.github.arn
-      }
-      Action = "sts:AssumeRoleWithWebIdentity"
-      Condition = {
-        StringEquals = {
-          "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-        }
-        StringLike = {
-          "token.actions.githubusercontent.com:sub" = "repo:${var.github_repo}:*"
-        }
-      }
-    }]
-  })
-}
-
-resource "aws_iam_role_policy" "github_deploy" {
-  name = "frozone-deploy-scoped"
-  role = aws_iam_role.github_deploy.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "s3:*",
-        "iam:*"
-      ]
-      Resource = [
-        aws_s3_bucket.archive.arn,
-        "${aws_s3_bucket.archive.arn}/*",
-        aws_iam_user.backup.arn,
-        aws_iam_role.github_deploy.arn
-      ]
-    }]
-  })
-}
+# No GitHub deploy role lives here. State is local, so CI can't run a
+# meaningful plan or apply; it only runs fmt/validate and never touches AWS.
+# Adding one back means adding a remote backend first — see README.

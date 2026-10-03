@@ -8,8 +8,3 @@ variable "aws_region" {
   type        = string
   default     = "us-east-1"
 }
-
-variable "github_repo" {
-  description = "GitHub repo allowed to assume the deploy role via OIDC, in 'owner/repo' form"
-  type        = string
-}
