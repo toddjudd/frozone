@@ -34,10 +34,22 @@ LOGFILE="${LOG_DIR}/backup-$(date -u +'%Y%m%dT%H%M%SZ').log"
 
 log "Starting backup of ${SOURCE_PATH} -> ${S3_REMOTE}:${S3_BUCKET}/${S3_PREFIX}"
 
+# --no-update-modtime: when a file's size and hash match the archive but its
+# mtime differs (touched, re-copied, restored from elsewhere), skip it. rclone
+# can't set an S3 object's mtime without copying the object onto itself, and
+# it can't do that for DEEP_ARCHIVE objects, so without this flag it re-uploads
+# the whole file. The bucket is versioned, so every needless re-upload would
+# also keep a full noncurrent copy for 180 days. The trade-off: the archive
+# keeps the file's original mtime.
+#
+# `copy` (never `sync`/`move`) also matters here: the backup user has no
+# s3:DeleteObject, and nothing in this script relies on server-side
+# copy + delete.
 RCLONE_ARGS=(
   copy "$SOURCE_PATH" "${S3_REMOTE}:${S3_BUCKET}/${S3_PREFIX}"
   --s3-storage-class DEEP_ARCHIVE
   --s3-chunk-size 64M
+  --no-update-modtime
   --log-file "$LOGFILE"
   --log-level INFO
 )
@@ -47,7 +59,8 @@ if rclone "${RCLONE_ARGS[@]}"; then
   if [[ -n "${DB_DUMP_PATH:-}" && -e "$DB_DUMP_PATH" ]]; then
     log "Uploading DB dump from ${DB_DUMP_PATH}"
     rclone copy "$DB_DUMP_PATH" "${S3_REMOTE}:${S3_BUCKET}/${S3_PREFIX}_db/" \
-      --s3-storage-class DEEP_ARCHIVE --log-file "$LOGFILE" --log-level INFO
+      --s3-storage-class DEEP_ARCHIVE --no-update-modtime \
+      --log-file "$LOGFILE" --log-level INFO
   fi
 
   log "Backup completed successfully"
