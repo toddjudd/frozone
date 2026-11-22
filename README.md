@@ -106,6 +106,27 @@ policy but not the key, because an `aws_iam_access_key` resource writes
 the secret into state in plaintext. One `aws iam create-access-key` keeps
 it out of state, and the `op` CLI feeds it to the scripts at run time.
 
+**Versioning, because "no delete" alone doesn't stop an overwrite.**
+`PutObject` can upload over an existing name, and with versioning off
+the old bytes would be gone. A compromised host could replace the whole
+archive with junk without ever calling `DeleteObject`. The bucket is
+versioned, so an overwrite only demotes the previous copy to a
+noncurrent version. A lifecycle rule expires noncurrent versions after
+180 days. Deep Archive bills every object for 180 days regardless, so
+the history costs roughly nothing extra. The backup user gets read-only
+access to old versions (`ListBucketVersions`, `GetObjectVersion`) for
+restores. It never gets `DeleteObjectVersion`, `PutBucketVersioning`,
+or `PutLifecycleConfiguration`, any of which would undo the protection.
+`RESTORE.md` covers getting a previous version back. That leaves 180
+days to notice an overwrite, and `verify.sh` only compares sizes, so a
+same-size overwrite won't trip it.
+
+`backup.sh` runs `rclone copy` with `--no-update-modtime`. rclone can't
+change a Deep Archive object's mtime in place, so without the flag it
+re-uploads any file whose mtime changed while its contents didn't. Under
+versioning, each of those re-uploads would also leave a full-size
+noncurrent copy behind.
+
 **Discord DMs over a webhook.** The notifier reuses an existing bot
 (token plus user ID, opens a DM channel, posts to it) instead of standing
 up a second notification path. See `scripts/notify.sh`.

@@ -44,7 +44,11 @@ I chose these:
 - **The backup host holds a long-lived AWS access key.** I scoped it to
   `PutObject`, `GetObject`, `RestoreObject`, and `ListBucket` on one
   bucket, with no delete permission, so whoever compromises the host can
-  fill the bucket but can't destroy the archive.
+  fill the bucket but can't destroy the archive. It can overwrite
+  objects. Bucket versioning keeps each overwritten copy for 180 days,
+  and the key has no permission to delete versions or change versioning
+  or lifecycle settings. A policy change that grants any of those is in
+  scope.
 - **Terraform state stays on my machine and out of git.** Nothing
   encrypts it beyond whatever your disk does. Treat the machine that runs
   `terraform apply` as sensitive.

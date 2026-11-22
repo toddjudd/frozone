@@ -49,6 +49,79 @@ exported values survive. A working `op` stays optional.
 Expect hours rather than minutes. 100GB over a typical home downstream
 connection takes a few hours.
 
+## Restoring a previous version (the archive was overwritten)
+
+Use this section if the current objects are junk: ransomware or a
+compromised host uploaded over existing names, or a bad backup run
+replaced good files. The backup user can't delete, but it can overwrite.
+The bucket is versioned, so every overwritten copy survives as a
+_noncurrent version_ for **180 days** after the overwrite. Then a
+lifecycle rule removes it. If you suspect an overwrite, act within that
+window.
+
+**0. If the backup host is the suspect, rotate its key first.** Otherwise
+the next Sunday run (or the attacker) keeps writing. Using an admin login:
+
+```
+aws iam list-access-keys --user-name frozone
+aws iam update-access-key --user-name frozone --access-key-id <old> --status Inactive
+aws iam create-access-key --user-name frozone   # paste into 1Password `frozone`
+```
+
+**1. Find when the damage started.** List every version of a file you
+know was hit. rclone shows older versions with their timestamp in the
+name (`photo-v2026-11-15-031502-000.jpg`):
+
+```
+rclone lsl --s3-versions <remote>:<bucket>/<prefix>path/to/known-file.jpg
+```
+
+Or with the AWS CLI:
+
+```
+aws s3api list-object-versions --bucket <bucket> --prefix <prefix>path/to/known-file.jpg
+```
+
+Pick a timestamp _before_ the first bad version.
+
+**2. Run the normal restore against that point in time.** rclone reads
+`--s3-version-at` from the `RCLONE_S3_VERSION_AT` environment variable.
+With it set, rclone treats the bucket as it looked at that moment, and
+the usual three steps work unchanged:
+
+```
+export RCLONE_S3_VERSION_AT="2026-11-14 00:00:00"   # UTC
+./scripts/restore.sh config/<name>.env --request --priority Bulk
+./scripts/restore.sh config/<name>.env --status
+./scripts/restore.sh config/<name>.env --download /path/to/restore-target
+unset RCLONE_S3_VERSION_AT
+```
+
+The restore request and the download both target the specific old
+version of each object, not the current junk. Files first uploaded
+_after_ that timestamp don't appear in this view. Fetch those separately
+without the variable once you've checked they aren't junk too.
+
+Version-at mode is read-only, so rclone refuses to write or delete while
+the variable is set. The backup user's policy includes
+`s3:ListBucketVersions` and `s3:GetObjectVersion` for this, so the
+`frozone` credentials (freshly rotated) are enough.
+
+**Single file, AWS CLI only:**
+
+```
+aws s3api restore-object --bucket <bucket> --key <prefix>path/file.jpg \
+  --version-id <VersionId> --restore-request '{"Days":7,"GlacierJobParameters":{"Tier":"Bulk"}}'
+# ...wait ~48h...
+aws s3api get-object --bucket <bucket> --key <prefix>path/file.jpg \
+  --version-id <VersionId> file.jpg
+```
+
+Don't "fix" the bucket by deleting the bad versions. The backup user
+can't, and the next backup overwrites them with the good local copy
+anyway. Once that happens the junk becomes noncurrent and expires on its
+own.
+
 ## If something doesn't match
 
 Run `./scripts/verify.sh config/<name>.env` against the _old_ source
